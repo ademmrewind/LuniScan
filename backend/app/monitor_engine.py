@@ -2,7 +2,7 @@ import asyncio
 import math
 import socket
 import ssl
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import Literal
@@ -24,6 +24,27 @@ CertificateState = Literal[
 ]
 MAX_BODY = 8192
 MAX_WIRE = 16384
+ASSESSMENT_HEADERS = {
+    "strict-transport-security",
+    "content-security-policy",
+    "x-content-type-options",
+    "referrer-policy",
+    "x-frame-options",
+    "permissions-policy",
+}
+
+
+@dataclass
+class ResponseEvidence:
+    headers: dict[str, list[str]] = field(default_factory=dict)
+    tls_version: str | None = None
+    tls_cipher: str | None = None
+
+    def capture(self, headers) -> None:
+        for key, value in headers:
+            name = key.decode("ascii")
+            if name in ASSESSMENT_HEADERS:
+                self.headers.setdefault(name, []).append(value.decode("latin-1"))
 
 
 class Certificate(BaseModel):
@@ -115,7 +136,13 @@ def verification_failure(code: int | None, checked: datetime) -> Certificate:
     )
 
 
-async def read_health(reader, writer, target: CheckTarget, host: str):
+async def read_health(
+    reader,
+    writer,
+    target: CheckTarget,
+    host: str,
+    evidence: ResponseEvidence | None = None,
+):
     protocol = h11.Connection(h11.CLIENT, max_incomplete_event_size=8192)
     writer.write(
         protocol.send(
@@ -148,6 +175,8 @@ async def read_health(reader, writer, target: CheckTarget, host: str):
             protocol.receive_data(chunk)
         elif isinstance(event, h11.Response):
             status = event.status_code
+            if evidence is not None:
+                evidence.capture(event.headers)
             if 300 <= status < 400 or marker is None:
                 return status, None
         elif isinstance(event, h11.Data):
@@ -162,7 +191,12 @@ async def read_health(reader, writer, target: CheckTarget, host: str):
             raise h11.RemoteProtocolError("Incomplete response")
 
 
-async def observe(address: Address, target: CheckTarget, warning_days: int) -> Outcome:
+async def observe(
+    address: Address,
+    target: CheckTarget,
+    warning_days: int,
+    evidence: ResponseEvidence | None = None,
+) -> Outcome:
     started = monotonic()
     writer = None
     tls = target.protocol in ("https", "tls")
@@ -195,18 +229,23 @@ async def observe(address: Address, target: CheckTarget, warning_days: int) -> O
             )
             connected = True
             if tls:
+                connection = writer.get_extra_info("ssl_object")
                 cert = certificate_info(
-                    writer.get_extra_info("ssl_object").getpeercert(),
+                    connection.getpeercert(),
                     datetime.now(UTC),
                     warning_days,
                 )
+                if evidence is not None:
+                    evidence.tls_version = connection.version()
+                    selected = connection.cipher()
+                    evidence.tls_cipher = selected[0] if selected else None
             if target.protocol in ("tcp", "tls"):
                 return result("healthy", "connected")
             host = target.hostname or (
                 f"[{address}]" if address.version == 6 else str(address)
             )
             status, matched = await read_health(
-                reader, writer, target, f"{host}:{target.port}"
+                reader, writer, target, f"{host}:{target.port}", evidence
             )
             if 300 <= status < 400:
                 return result(

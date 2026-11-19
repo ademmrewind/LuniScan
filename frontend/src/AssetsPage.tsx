@@ -3,6 +3,7 @@ import { Plus, Radar, RefreshCw, Search, X } from 'lucide-react'
 import { inventoryApi, type Asset, type AssetInput, type Availability, type Scope } from './inventoryApi'
 import { StatusBadge } from './StatusBadge'
 import { AssetObservations } from './AssetObservations'
+import { AssetSecurity } from './AssetSecurity'
 import { DiscoveryPanel } from './DiscoveryPanel'
 
 const statuses = ['reachable', 'unreachable', 'unknown'] as const
@@ -244,6 +245,7 @@ export function AssetsPage() {
             <button className="asset-button text-rose-300" disabled={actionDisabled} onClick={() => openDialog({ kind: 'delete', asset: active })}>Delete</button>
           </div>
           <AssetObservations key={active.id} assetId={active.id} revision={revision} />
+          <AssetSecurity key={'security-' + active.id} assetId={active.id} />
         </section>
       )}
       <section aria-label="Asset inventory" aria-busy={loading} className="table-surface">

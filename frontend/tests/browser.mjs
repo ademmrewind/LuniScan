@@ -375,6 +375,71 @@ async function exerciseMonitoring(page, monitor, tls) {
   await detail.waitFor({ state: 'hidden' })
 }
 
+async function exerciseAssessment(page, api, monitor, tls) {
+  const link = (name) => page.getByRole('link', { name, exact: true })
+  const button = (name) => page.getByRole('button', { name, exact: true })
+  const field = (name) => page.getByLabel(name, { exact: true })
+  const assets = await (await fetch(api + '/api/assets')).json()
+  const asset = assets.find((item) => item.ip_address === '127.0.0.1')
+  const profileResponse = await fetch(api + '/api/monitoring/profiles', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ asset_id: asset.id, ip_address: asset.ip_address, protocol: 'http',
+      port: monitor.port, name: 'Assessment fixture', path: '/health', confirm_approval: true }),
+  })
+  assert.equal(profileResponse.status, 201)
+  const profile = await profileResponse.json()
+  await link('Security Assessment').click()
+  await page.getByText('No assessments yet.', { exact: true }).waitFor()
+  await field('Assessment asset').selectOption(String(asset.id))
+  await field('Assessment service').selectOption(String(profile.id))
+  assert.equal(await button('Start assessment').isDisabled(), true)
+  await field('I authorize assessment of this endpoint.').check()
+  await button('Start assessment').click()
+  const result = page.getByRole('region', { name: 'Assessment results' })
+  await result.getByText(/Coverage: 5 assessed/).waitFor()
+  await result.getByText('Header absent', { exact: true }).first().waitFor()
+  await field('Finding severity').selectOption('low')
+  await button('X-Content-Type-Options').click()
+  const finding = page.getByRole('region', { name: 'Finding details' })
+  await finding.getByText('Observed configuration', { exact: true }).waitFor()
+  await button('Acknowledge finding').click()
+  await finding.getByText('Acknowledged', { exact: true }).waitFor()
+  for (const format of ['PDF', 'JSON', 'CSV']) {
+    const download = page.waitForEvent('download')
+    await button('Export assessment ' + format).click()
+    assert.equal((await download).suggestedFilename(), 'security-assessment-1.' + format.toLowerCase())
+  }
+  monitor.mode = 'protected'
+  await field('I authorize assessment of this endpoint.').check()
+  await button('Start assessment').click()
+  await result.getByRole('heading', { name: 'Assessment #2 results', exact: true }).waitFor()
+  await finding.getByText('Resolved', { exact: true }).waitFor()
+  if (tls) {
+    await link('Service Monitoring').click()
+    await button('New profile').click()
+    await field('Profile name').fill('Assessment TLS fixture')
+    await field('Approved asset').selectOption(String(asset.id))
+    await field('Protocol').selectOption('https')
+    await field('Approved TCP port').fill(String(tls.address().port))
+    await field('I authorize this destination and port.').check()
+    const approval = page.waitForResponse((response) => response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/monitoring/profiles')
+    await button('Create profile').click()
+    const approved = await (await approval).json()
+    await link('Security Assessment').click()
+    await field('Assessment asset').selectOption(String(asset.id))
+    await field('Assessment service').selectOption(String(approved.id))
+    await field('I authorize assessment of this endpoint.').check()
+    await button('Start assessment').click()
+    await result.getByText('TLS classification: verification failure', { exact: true }).waitFor()
+    await result.getByText(/Coverage: 1 assessed · 8 inconclusive/).waitFor()
+  }
+  await link('Assets').click()
+  await button(asset.display_name).click()
+  await page.getByText('Security assessments', { exact: true }).click()
+  await page.getByText(tls ? /Latest #3/ : /Latest #2/).waitFor()
+}
+
 const folder = await mkdtemp(join(tmpdir(), 'luniscan-edge-'))
 const database = join(folder, 'inventory.db')
 const keyPath = join(folder, 'loopback.key')
@@ -387,7 +452,10 @@ const responder = createHttpServer((request, response) => {
     response.writeHead(302, { Location: '/unexpected' })
     response.end()
   } else {
-    response.writeHead(200, { 'Content-Type': 'text/plain' })
+    response.writeHead(200, {
+      'Content-Type': 'text/plain',
+      ...(monitor.mode === 'protected' ? { 'X-Content-Type-Options': 'nosniff' } : {}),
+    })
     response.end('loopback ready')
   }
 })
@@ -441,10 +509,11 @@ try {
   })
   await exercise(page, web, api, port)
   await exerciseMonitoring(page, monitor, tls)
+  await exerciseAssessment(page, api, monitor, tls)
   await exercisePagination(page, web, python, database)
   await page.setViewportSize({ width: 375, height: 812 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  for (const name of ['Overview', 'Assets', 'Scans', 'Scan History', 'Service Monitoring', 'Reports', 'Settings']) {
+  for (const name of ['Overview', 'Assets', 'Scans', 'Scan History', 'Service Monitoring', 'Security Assessment', 'Reports', 'Settings']) {
     await page.getByRole('link', { name, exact: true }).click()
     await page.getByRole('heading', { name, exact: true }).waitFor()
     await pause(350)

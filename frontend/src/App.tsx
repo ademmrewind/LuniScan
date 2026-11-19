@@ -1,6 +1,6 @@
 import {
   Activity, Boxes, Database, FileDown, History, LayoutDashboard, HeartPulse,
-  Radar, RefreshCw, Settings, ShieldCheck,
+  Radar, RefreshCw, Settings, ShieldCheck, ClipboardCheck,
 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { gsap } from 'gsap'
@@ -12,6 +12,7 @@ import { SettingsPage } from './SettingsPage'
 
 const OverviewPage = lazy(() => import('./OverviewPage'))
 const MonitoringPage = lazy(() => import('./MonitoringPage'))
+const SecurityAssessmentPage = lazy(() => import('./SecurityAssessmentPage'))
 
 const navigation = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, description: 'Track asset availability, service checks, and recent activity.' },
@@ -19,6 +20,7 @@ const navigation = [
   { id: 'scans', label: 'Scans', icon: Radar, description: 'Check approved service endpoints and track scan jobs.' },
   { id: 'scan-history', label: 'Scan History', icon: History, description: 'Review completed checks and compare connectivity changes.' },
   { id: 'monitoring', label: 'Service Monitoring', icon: HeartPulse, description: 'Inspect approved endpoints, certificates and monitoring alerts.' },
+  { id: 'assessment', label: 'Security Assessment', icon: ClipboardCheck, description: 'Review observed HTTP header and TLS configuration on approved services.' },
   { id: 'reports', label: 'Reports', icon: FileDown, description: 'Generate PDF reports and export completed scan results.' },
   { id: 'settings', label: 'Settings', icon: Settings, description: 'Approved scope is configured in the backend environment.' },
 ] as const
@@ -108,6 +110,7 @@ export function App() {
         {page.id === 'scans' && <ScansPage />}
         {page.id === 'scan-history' && <ScanHistoryPage />}
         {page.id === 'monitoring' && <Suspense fallback={<p role="status">Loading monitoring…</p>}><MonitoringPage /></Suspense>}
+        {page.id === 'assessment' && <Suspense fallback={<p role="status">Loading assessments…</p>}><SecurityAssessmentPage /></Suspense>}
         {page.id === 'reports' && <ReportsPage />}
         {page.id === 'settings' && <SettingsPage />}
         {page.id === 'overview' && (

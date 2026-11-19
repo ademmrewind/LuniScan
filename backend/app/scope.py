@@ -120,6 +120,9 @@ class Scope:
         self._next_probe = monotonic() + 1
         return address
 
+    def cooldown_remaining(self) -> float:
+        return max(0.0, self._next_probe - monotonic())
+
     def probe_service(
         self, value: str, port: int, before: Callable[[], None] | None = None
     ) -> tuple[Availability, ProbeError | None, float]:

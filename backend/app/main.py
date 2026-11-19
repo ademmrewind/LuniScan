@@ -13,6 +13,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.analytics import analytics_indexes
 from app.analytics import router as analytics_router
+from app.assessment_export import router as assessment_export_router
+from app.assessments import recover_assessments
+from app.assessments import router as assessments_router
 from app.config import Settings
 from app.database import check_database, initialize_database
 from app.discovery import recover_discovery
@@ -27,7 +30,7 @@ from app.scope import Scope
 from app.security import LocalAPIProtection
 
 logger = logging.getLogger(__name__)
-API_VERSION = "0.7.0"
+API_VERSION = "0.8.0"
 
 
 class HealthStatus(BaseModel):
@@ -59,6 +62,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     index.create(engine, checkfirst=True)
                 recover_jobs(engine)
                 recover_discovery(engine)
+                recover_assessments(engine)
             except SQLAlchemyError:
                 raise RuntimeError("Could not initialize the SQLite database.") from None
             application.state.engine = engine
@@ -74,6 +78,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(discovery_router)
     application.include_router(intelligence_router)
     application.include_router(monitoring_router)
+    application.include_router(assessments_router)
+    application.include_router(assessment_export_router)
     application.include_router(scans_router)
     application.include_router(analytics_router)
     application.include_router(reporting_router)

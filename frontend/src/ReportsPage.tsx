@@ -68,6 +68,10 @@ export function ReportsPage() {
   }
 
   return <div className="two-pane report-layout">
+    <section className={panelStyle + ' col-span-full flex flex-wrap items-center justify-between gap-3'}>
+      <div><h2>Security assessment reports</h2><p className="mt-1 text-sm text-muted">Export coverage, observed findings and remediation from a completed assessment.</p></div>
+      <a className="asset-button" href="#assessment">Open assessment reports</a>
+    </section>
     <section className={panelStyle} aria-busy={busy}>
       <h2 className="mb-4 flex items-center gap-2 font-semibold"><FileText size={18} className="text-sky-300" aria-hidden="true" /> PDF report</h2>
       <form onSubmit={download}>

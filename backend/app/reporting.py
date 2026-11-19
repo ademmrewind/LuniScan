@@ -299,8 +299,7 @@ def report_rows(db: DB, period: Range, kind: ReportType):
     return sections
 
 
-def render_pdf(summary, sections, period, kind: ReportType) -> bytes:
-    output = BytesIO()
+def report_styles():
     styles = getSampleStyleSheet()
     styles["Title"].textColor = colors.HexColor("#123753")
     styles.add(
@@ -320,6 +319,12 @@ def render_pdf(summary, sections, period, kind: ReportType) -> bytes:
             textColor=colors.white,
         )
     )
+    return styles
+
+
+def render_pdf(summary, sections, period, kind: ReportType) -> bytes:
+    output = BytesIO()
+    styles = report_styles()
     doc = SimpleDocTemplate(
         output,
         pagesize=A4,

@@ -20,6 +20,7 @@ def initialize_database(engine: Engine) -> None:
             "last_seen": "DATETIME",
         },
         "scan_results": {"duration_ms": "FLOAT"},
+        "security_assessments": {"path": "VARCHAR(128) NOT NULL DEFAULT '/'"},
     }
     with engine.begin() as connection:
         connection.exec_driver_sql("BEGIN IMMEDIATE")

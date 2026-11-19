@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added on-demand configuration assessments of approved HTTP(S) profiles with sanitized header and TLS evidence.
+- Added stored finding histories, acknowledgement, verified resolution, assessment exports, and an asset security panel.
+
 - Added manually initiated TCP, HTTP, HTTPS, and TLS profiles pinned to registered, approved IP addresses and ports.
 - Added bounded HTTP expectations, verified TLS metadata, health trends, persistent local alerts, and monitoring sections in PDF reports.
 - Added service monitoring and alert interfaces with the original TCP scans and discovery available alongside them.

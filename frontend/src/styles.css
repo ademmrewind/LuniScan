@@ -43,7 +43,7 @@
   }
 
   .shell-navigation {
-    @apply col-span-2 row-start-2 grid grid-cols-2 gap-x-3 sm:grid-cols-3;
+    @apply col-span-2 row-start-2 grid grid-cols-2 gap-x-3 sm:grid-cols-4;
   }
 
   .shell-health {
@@ -58,7 +58,7 @@
   .shell-health.tone-offline { color: #fda4af; }
   .shell-health.tone-degraded, .shell-health.tone-outdated { color: #f1cb89; }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 1280px) {
     .shell-header { position: sticky; top: 0; }
     .shell-bar { grid-template-columns: 1fr auto 1fr; min-height: 4.25rem; }
     .shell-navigation { display: flex; grid-column: 2; grid-row: 1; gap: .4rem; }
@@ -277,6 +277,15 @@
   .status-degraded {
     @apply bg-amber-400/10 text-amber-200;
   }
+
+  .severity-tag {
+    @apply inline-flex rounded-full border border-current/20 px-2.5 py-1 text-xs font-medium capitalize;
+  }
+
+  .severity-informational { @apply bg-sky-400/10 text-sky-200; }
+  .severity-low { @apply bg-yellow-300/10 text-yellow-200; }
+  .severity-medium { @apply bg-orange-400/10 text-orange-200; }
+  .severity-high { @apply bg-rose-400/10 text-rose-200; }
 
   .asset-button {
     @apply inline-flex items-center justify-center gap-2 rounded-sm border border-line px-3 py-2 text-sm font-medium motion-safe:transition-colors hover:bg-editorial/10 disabled:cursor-not-allowed disabled:opacity-50;

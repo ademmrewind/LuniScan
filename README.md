@@ -153,6 +153,29 @@ The **Alert Center** records newly unreachable, degraded, repeated failure, cert
 
 Full and monitoring PDFs include health counts, HTTP observations, latest certificate states, and open alerts. Existing scan JSON and CSV exports retain their original purpose.
 
+## Security configuration assessment
+
+Open **Security Assessment**, select an asset and an enabled HTTP or HTTPS monitoring profile, confirm permission for that exact endpoint, and start. One bounded request uses the profile's approved numeric address, port, configured path, and default TLS verification. The assessor uses the shared connection limit and revalidates the destination immediately before dialing. No redirects are followed. The assessor uses response headers and TLS handshake data and does not save response bodies or arbitrary headers.
+
+Supported HTTP checks cover HSTS, enforcing CSP, X-Content-Type-Options, Referrer-Policy, X-Frame-Options, and Permissions-Policy. HSTS is applicable to HTTPS. A restrictive CSP frame-ancestors directive can substitute for X-Frame-Options. CSP and framing findings are contextual review items, and the rules classify common directives rather than simulate a browser. TLS checks cover verifier outcome, expiry, and the version and cipher seen during normal negotiation. One negotiation cannot establish all server-supported settings. TLS warning days use the existing TLS warning threshold.
+
+Informational findings identify controls to review. Low severity identifies a missing or weak defense. Medium identifies a transport or trust issue such as rejected certificate verification or an obsolete version observed during negotiation. The dashboard counts observed findings and incomplete rules separately. It assigns neither a CVSS score nor a probability of exploitation. Non-2xx responses do not establish application header coverage.
+
+An acknowledgement records manual review. A later successful observation must demonstrate the same control before the finding is resolved. Inconclusive or inapplicable observations leave prior findings open. An assessment may finish with incomplete coverage. Cancelled and interrupted runs do not commit newly observed findings. Assessments are started on demand and never scheduled.
+
+| Method and path | Purpose |
+| --- | --- |
+| POST or GET /api/security/assessments | Start one approved assessment or list paginated history |
+| GET /api/security/assessments/{id} | Read execution status, coverage and observations |
+| POST /api/security/assessments/{id}/cancel | Cancel a pending or running assessment with an empty JSON object |
+| GET /api/security/assessments/{id}/export/{format} | Download a completed assessment as PDF, JSON or CSV |
+| GET /api/security/findings | List findings with optional asset, severity, status and unresolved filters |
+| GET /api/security/findings/{id} | Read finding details and its observation history |
+| POST /api/security/findings/{id}/acknowledge | Record review with an empty JSON object |
+| GET /api/security/summary | Read current counts and daily observations. Pass asset_id for one asset. |
+
+The new SQLite tables are created on startup without replacing inventory or monitoring data. The asset detail panel shows recent assessments and remediation for unresolved findings. Completed exports contain only sanitized evidence.
+
 ## Dashboard, analytics, and reports
 
 **Overview** combines backend health with inventory and service approval counts, job outcomes, recent jobs, and connectivity changes. The Recharts figures show asset availability, service connectivity, scan activity, completed jobs, and connectivity changes. Change counts compare consecutive completed checks for the same asset address revision and service. A prior check outside the selected period can establish the baseline. First observations and transitions involving unknown results are excluded from the change counts.
