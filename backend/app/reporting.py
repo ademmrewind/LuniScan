@@ -31,6 +31,7 @@ from app.analytics import (
     recent_jobs_query,
 )
 from app.inventory import DB, Asset
+from app.monitor_models import MonitorAlert, MonitorCheck, MonitorProfile
 from app.scan_models import ScanResult, Service, utc
 
 router = APIRouter(prefix="/api/reports", tags=["reporting"])
@@ -217,6 +218,84 @@ def report_rows(db: DB, period: Range, kind: ReportType):
                 (39, 67, 102, 102, 103, 40, 54),
             )
         )
+        outcomes = (
+            select(MonitorCheck.health, func.count())
+            .where(period.includes(MonitorCheck.checked_at))
+            .group_by(MonitorCheck.health)
+        )
+        checks = (
+            select(
+                MonitorProfile.name,
+                MonitorCheck.health,
+                MonitorCheck.http_status,
+                MonitorCheck.duration_ms,
+                MonitorCheck.checked_at,
+            )
+            .join(MonitorProfile)
+            .where(period.includes(MonitorCheck.checked_at))
+            .order_by(MonitorCheck.id.desc())
+        )
+        cert_ids = (
+            select(func.max(MonitorCheck.id))
+            .where(MonitorCheck.certificate_state.is_not(None))
+            .group_by(MonitorCheck.profile_id)
+        )
+        certificates = (
+            select(
+                MonitorProfile.name,
+                MonitorCheck.certificate_state,
+                func.json_extract(MonitorCheck.result, "$.certificate.expires_at"),
+                MonitorCheck.checked_at,
+            )
+            .join(MonitorProfile)
+            .where(
+                MonitorProfile.enabled,
+                MonitorProfile.archived.is_(False),
+                MonitorCheck.id.in_(cert_ids),
+            )
+            .order_by(MonitorProfile.id)
+        )
+        active = (
+            select(
+                MonitorProfile.name,
+                MonitorAlert.kind,
+                MonitorAlert.severity,
+                MonitorAlert.status,
+                MonitorAlert.created_at,
+            )
+            .join(MonitorProfile)
+            .where(MonitorAlert.resolved_at.is_(None))
+            .order_by(MonitorAlert.id.desc())
+        )
+        for title, labels, query, widths in (
+            (
+                "Service health summary",
+                ("Health", "Observed checks"),
+                outcomes,
+                (240, 260),
+            ),
+            (
+                "Service availability and HTTP monitoring history",
+                ("Service", "Health", "HTTP", "Duration (ms)", "Checked UTC"),
+                checks,
+                (166, 74, 42, 75, 143),
+            ),
+            (
+                "Latest TLS certificate states",
+                ("Service", "Recorded state", "Expires (UTC)", "Observed (UTC)"),
+                certificates,
+                (170, 110, 115, 105),
+            ),
+            (
+                "Open monitoring alerts",
+                ("Service", "Alert", "Severity", "Status", "Created UTC"),
+                active,
+                (130, 115, 58, 83, 114),
+            ),
+        ):
+            sections.append(
+                (title, labels, db.execute(query.limit(ROW_LIMIT + 1)).all(), widths)
+            )
     return sections
 
 

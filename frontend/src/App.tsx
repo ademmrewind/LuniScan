@@ -1,5 +1,5 @@
 import {
-  Activity, Boxes, Database, FileDown, History, LayoutDashboard,
+  Activity, Boxes, Database, FileDown, History, LayoutDashboard, HeartPulse,
   Radar, RefreshCw, Settings, ShieldCheck,
 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
@@ -11,12 +11,14 @@ import { ReportsPage } from './ReportsPage'
 import { SettingsPage } from './SettingsPage'
 
 const OverviewPage = lazy(() => import('./OverviewPage'))
+const MonitoringPage = lazy(() => import('./MonitoringPage'))
 
 const navigation = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, description: 'Track asset availability, service checks, and recent activity.' },
   { id: 'assets', label: 'Assets', icon: Boxes, description: 'Manage your inventory and check approved laboratory endpoints.' },
   { id: 'scans', label: 'Scans', icon: Radar, description: 'Check approved service endpoints and track scan jobs.' },
   { id: 'scan-history', label: 'Scan History', icon: History, description: 'Review completed checks and compare connectivity changes.' },
+  { id: 'monitoring', label: 'Service Monitoring', icon: HeartPulse, description: 'Inspect approved endpoints, certificates and monitoring alerts.' },
   { id: 'reports', label: 'Reports', icon: FileDown, description: 'Generate PDF reports and export completed scan results.' },
   { id: 'settings', label: 'Settings', icon: Settings, description: 'Approved scope is configured in the backend environment.' },
 ] as const
@@ -105,6 +107,7 @@ export function App() {
         {page.id === 'assets' && <AssetsPage />}
         {page.id === 'scans' && <ScansPage />}
         {page.id === 'scan-history' && <ScanHistoryPage />}
+        {page.id === 'monitoring' && <Suspense fallback={<p role="status">Loading monitoring…</p>}><MonitoringPage /></Suspense>}
         {page.id === 'reports' && <ReportsPage />}
         {page.id === 'settings' && <SettingsPage />}
         {page.id === 'overview' && (

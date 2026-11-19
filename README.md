@@ -131,6 +131,28 @@ Interactive OpenAPI documentation is available at <http://127.0.0.1:8000/docs>.
 | `GET /api/scan-history/{result_id}/comparison` | Compare with the previous completed check for the same endpoint |
 | `GET /api/scan-jobs/{id}/export/{format}` | Download completed results as `json` or `csv` |
 
+## Service monitoring and TLS
+
+Open **Service Monitoring → New profile** and select a registered asset. Approve its specific port and protocol, then save. TCP checks connect and close. For HTTP or HTTPS, choose a relative health path beginning with one slash, a status range, and optionally a non-sensitive UTF-8 response marker. Select the profile and click **Run manual check**. Disabling checks revokes execution without erasing history. Endpoint IP, port, and protocol are fixed for a profile so historical observations retain the same identity. Archive old profiles when replacing an endpoint.
+
+The numeric approved address is passed directly to the socket. An optional hostname is used for HTTP Host and TLS SNI or name verification. HTTP redirects are recorded as degraded and never followed. Checks use no proxy or authentication, a 250–3,000 ms timeout, an 8 KiB content budget, a 16 KiB wire-read budget, and the same one-operation limiter as scans and discovery. No response bodies are retained or returned. Expected markers are write-only through the API.
+
+HTTPS and TLS use the operating environment's default trust store and verify the endpoint name or IP. The verifier never retries without verification. Successful handshakes can report certificate details; rejected handshakes expose only the classification and verification time. Expiration thresholds default to 30 warning days and 7 critical days. Configure them through the backend environment. The dashboard displays the latest recorded certificate state. Days remaining refer to when it was inspected. HTTP status and certificate findings describe observations, not confirmed vulnerabilities.
+
+The **Alert Center** records newly unreachable, degraded, repeated failure, certificate expiration, and verification events. Three consecutive non-healthy results trigger repeated failure. Acknowledgement records review. A later successful observation resolves a corresponding health condition, and a verified certificate observation resolves the applicable certificate conditions. One unresolved alert per profile and condition is kept. Alerts are local and check execution is manual.
+
+| Method and path | Purpose |
+| --- | --- |
+| GET or POST /api/monitoring/profiles | List filtered profiles or register an approved endpoint |
+| GET, PUT, or DELETE /api/monitoring/profiles/{id} | Inspect, edit, or archive one profile |
+| POST /api/monitoring/profiles/{id}/check | Run one manual observation with an empty JSON object |
+| GET /api/monitoring/profiles/{id}/history | Read paginated observations |
+| GET /api/monitoring/summary | Read current counts and daily trends for the last 30 days |
+| GET /api/monitoring/alerts | Filter alert history and current status |
+| POST /api/monitoring/alerts/{id}/acknowledge | Acknowledge an alert with an empty JSON object |
+
+Full and monitoring PDFs include health counts, HTTP observations, latest certificate states, and open alerts. Existing scan JSON and CSV exports retain their original purpose.
+
 ## Dashboard, analytics, and reports
 
 **Overview** combines backend health with inventory and service approval counts, job outcomes, recent jobs, and connectivity changes. The Recharts figures show asset availability, service connectivity, scan activity, completed jobs, and connectivity changes. Change counts compare consecutive completed checks for the same asset address revision and service. A prior check outside the selected period can establish the baseline. First observations and transitions involving unknown results are excluded from the change counts.
@@ -174,6 +196,8 @@ docker compose config --quiet
 ```
 
 The Edge integration checks start isolated loopback services and use a disposable SQLite database. Install Microsoft Edge before running them.
+
+Set LUNISCAN_TEST_OPENSSL to the local OpenSSL executable when running the Edge check to include the real self-signed TLS rejection scenario. Temporary certificate files are removed by the test.
 
 ## Known limitations
 

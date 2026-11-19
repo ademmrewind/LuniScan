@@ -112,6 +112,10 @@ class Scope:
         sleep(max(0, self._next_probe - monotonic()))
         if before is not None:
             before()
+        return self.reserve(value)
+
+    def reserve(self, value: str) -> Address:
+        """Validate the literal and reserve a connection while holding the operation lock."""
         address = self.require(value)
         self._next_probe = monotonic() + 1
         return address

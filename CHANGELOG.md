@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added manually initiated TCP, HTTP, HTTPS, and TLS profiles pinned to registered, approved IP addresses and ports.
+- Added bounded HTTP expectations, verified TLS metadata, health trends, persistent local alerts, and monitoring sections in PDF reports.
+- Added service monitoring and alert interfaces with the original TCP scans and discovery available alongside them.
+
 - Added asset groups, tags, notes, last-seen timestamps, and persisted availability history through additive SQLite migrations.
 - Added bounded discovery progress, cancellation, and run history while retaining the synchronous discovery API.
 - Recorded TCP duration and error categories and added an asset intelligence panel for recent observations and changes.

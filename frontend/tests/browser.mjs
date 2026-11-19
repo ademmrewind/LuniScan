@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, rmdir, unlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rmdir, unlink } from 'node:fs/promises'
+import { createServer as createHttpServer } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -308,11 +310,103 @@ async function exercisePagination(page, web, python, database) {
   await button('Older events').waitFor()
 }
 
+async function exerciseMonitoring(page, monitor, tls) {
+  const button = (name) => page.getByRole('button', { name, exact: true })
+  const field = (name) => page.getByLabel(name, { exact: true })
+  const detail = page.getByRole('region', { name: 'Service details' })
+  await page.getByRole('link', { name: 'Service Monitoring', exact: true }).click()
+  await page.getByText('No matching profiles.', { exact: true }).waitFor()
+
+  async function add(name, protocol, port) {
+    await button('New profile').click()
+    await field('Profile name').fill(name)
+    await field('Approved asset').locator('option').nth(1).waitFor({ state: 'attached' })
+    await field('Approved asset').selectOption({ index: 1 })
+    await field('Protocol').selectOption(protocol)
+    await field('Approved TCP port').fill(String(port))
+    if (protocol === 'http') {
+      await field('Health path').fill('/health')
+      await field('Expected response marker').fill('loopback ready')
+    }
+    await field('I authorize this destination and port.').check()
+    await button('Create profile').click()
+    await detail.getByRole('heading', { name, exact: true }).waitFor()
+  }
+
+  await add('Local HTTP health', 'http', monitor.port)
+  await button('Run manual check').click()
+  await detail.getByText('HTTP 200', { exact: true }).waitFor()
+  await field('Protocol filter').selectOption('tls')
+  await page.getByText('No matching profiles.', { exact: true }).waitFor()
+  await field('Protocol filter').selectOption('http')
+  await button('Local HTTP health').waitFor()
+  monitor.mode = 'redirect'
+  await pause(1100)
+  await button('Run manual check').click()
+  await detail.getByText('redirect blocked', { exact: true }).waitFor()
+  assert.equal(monitor.redirectVisits, 0)
+  await button('Alert Center').click()
+  await field('Alert status').selectOption('active')
+  await page.getByRole('button', { name: /Acknowledge alert/ }).click()
+  await field('Alert status').selectOption('acknowledged')
+  await page.getByText(/Acknowledged .*:/).waitFor()
+  await button('Monitored services').click()
+  monitor.mode = 'ready'
+  await pause(1100)
+  await button('Run manual check').click()
+  await detail.getByText(/Resolved .*:/).waitFor()
+  await button('Edit profile').click()
+  await field('Timeout (ms)').fill('1800')
+  await field('I authorize this destination and port.').check()
+  await button('Save profile').click()
+  await detail.getByText(/1800 ms timeout/).waitFor()
+  if (tls) {
+    await add('Local test certificate', 'tls', tls.address().port)
+    await pause(1100)
+    await button('Run manual check').click()
+    await detail.getByRole('heading', { name: 'TLS Certificate Intelligence', exact: true }).waitFor()
+    await detail.getByText('untrusted', { exact: true }).waitFor()
+    await field('Protocol filter').selectOption('')
+    await field('Certificate filter').selectOption('untrusted')
+    await button('Local test certificate').waitFor()
+  }
+  page.once('dialog', (dialog) => dialog.accept())
+  await button('Archive profile').click()
+  await detail.waitFor({ state: 'hidden' })
+}
+
 const folder = await mkdtemp(join(tmpdir(), 'luniscan-edge-'))
 const database = join(folder, 'inventory.db')
+const keyPath = join(folder, 'loopback.key')
+const certPath = join(folder, 'loopback.pem')
 const listener = await listen()
+const monitor = { port: 0, mode: 'ready', redirectVisits: 0 }
+const responder = createHttpServer((request, response) => {
+  if (request.url === '/unexpected') monitor.redirectVisits++
+  if (monitor.mode === 'redirect') {
+    response.writeHead(302, { Location: '/unexpected' })
+    response.end()
+  } else {
+    response.writeHead(200, { 'Content-Type': 'text/plain' })
+    response.end('loopback ready')
+  }
+})
+responder.listen(0, '127.0.0.1')
+await once(responder, 'listening')
+monitor.port = responder.address().port
+let tls
 let apiProcess, webProcess, browser
 try {
+  if (process.env.LUNISCAN_TEST_OPENSSL) {
+    await promisify(execFile)(process.env.LUNISCAN_TEST_OPENSSL, [
+      'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+      '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1',
+      '-keyout', keyPath, '-out', certPath,
+    ], { windowsHide: true })
+    tls = createHttpsServer({ key: await readFile(keyPath), cert: await readFile(certPath) }, (_, response) => response.end())
+    tls.listen(0, '127.0.0.1')
+    await once(tls, 'listening')
+  }
   const port = listener.address().port
   const apiPort = await freePort()
   const webPort = await freePort()
@@ -346,10 +440,11 @@ try {
     if (path.startsWith('/api/')) network.push({ method: response.request().method(), path, status: response.status() })
   })
   await exercise(page, web, api, port)
+  await exerciseMonitoring(page, monitor, tls)
   await exercisePagination(page, web, python, database)
   await page.setViewportSize({ width: 375, height: 812 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  for (const name of ['Overview', 'Assets', 'Scans', 'Scan History', 'Reports', 'Settings']) {
+  for (const name of ['Overview', 'Assets', 'Scans', 'Scan History', 'Service Monitoring', 'Reports', 'Settings']) {
     await page.getByRole('link', { name, exact: true }).click()
     await page.getByRole('heading', { name, exact: true }).waitFor()
     await pause(350)
@@ -377,6 +472,11 @@ try {
   await browser?.close()
   await Promise.all([stop(apiProcess), stop(webProcess)])
   await close(listener)
+  await close(responder)
+  if (tls) await close(tls)
+  for (const path of [keyPath, certPath]) {
+    await unlink(path).catch((error) => { if (error.code !== 'ENOENT') throw error })
+  }
   await unlink(database).catch((error) => { if (error.code !== 'ENOENT') throw error })
   await rmdir(folder)
 }

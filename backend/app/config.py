@@ -1,4 +1,4 @@
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     approved_scope: list[str] = Field(default=["127.0.0.1", "::1"], max_length=64)
     approved_service_port: int = Field(default=8443, ge=1, le=65535)
     discovery_limit: int = Field(default=4, ge=1, le=8)
+    tls_warn_days: int = Field(default=30, ge=1, le=365)
+    tls_critical_days: int = Field(default=7, ge=1, le=365)
+
+    @model_validator(mode="after")
+    def check_tls_thresholds(self):
+        if self.tls_critical_days > self.tls_warn_days:
+            raise ValueError("TLS critical threshold must not exceed the warning threshold.")
+        return self
 
     @field_validator("database_url")
     @classmethod
