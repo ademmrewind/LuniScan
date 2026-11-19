@@ -140,7 +140,7 @@ def completed_results(period: Period):
     )
 
 
-def changes_query(period: Period):
+def changes_query(period: Period, asset_id: int | None = None):
     prior = aliased(ScanResult)
     prior_job = aliased(ScanJob)
     previous = (
@@ -158,8 +158,11 @@ def changes_query(period: Period):
         .correlate(ScanResult)
         .scalar_subquery()
     )
+    base = completed_results(period)
+    if asset_id is not None:
+        base = base.where(ScanResult.asset_id == asset_id)
     observed = (
-        completed_results(period)
+        base
         .with_only_columns(
             ScanResult.id,
             ScanResult.job_id,

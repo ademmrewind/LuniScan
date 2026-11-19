@@ -29,6 +29,7 @@ export interface Result extends Endpoint {
   status: Availability
   checked_at: string
   error_category: string | null
+  duration_ms: number | null
 }
 export interface JobDetail extends ScanJob { plan: Endpoint[]; results: Result[] }
 export interface HistoryResult extends Result { duration_seconds: number }

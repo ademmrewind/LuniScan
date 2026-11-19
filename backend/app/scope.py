@@ -35,10 +35,6 @@ def parse_address(value: str) -> Address:
     return address
 
 
-def tcp_probe(address: Address, port: int) -> Availability:
-    return probe_tcp_details(address, port)[0]
-
-
 def probe_tcp_details(
     address: Address, port: int
 ) -> tuple[Availability, ProbeError | None]:
@@ -110,9 +106,6 @@ class Scope:
         finally:
             self._lock.release()
 
-    def probe(self, value: str) -> Availability:
-        return tcp_probe(self._prepare_probe(value), self.port)
-
     def _prepare_probe(
         self, value: str, before: Callable[[], None] | None = None
     ) -> Address:
@@ -124,6 +117,9 @@ class Scope:
         return address
 
     def probe_service(
-        self, value: str, port: int, before: Callable[[], None]
-    ) -> tuple[Availability, ProbeError | None]:
-        return probe_tcp_details(self._prepare_probe(value, before), port)
+        self, value: str, port: int, before: Callable[[], None] | None = None
+    ) -> tuple[Availability, ProbeError | None, float]:
+        address = self._prepare_probe(value, before)
+        started = monotonic()
+        status, category = probe_tcp_details(address, port)
+        return status, category, round(max(0, monotonic() - started) * 1000, 3)

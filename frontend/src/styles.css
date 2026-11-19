@@ -215,13 +215,31 @@
   }
 
   @media (min-width: 1280px) {
+    .inventory-content:has(.asset-drawer) {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(21rem, 28rem);
+      align-items: start;
+      gap: 1rem;
+    }
+
+    .inventory-content:has(.asset-drawer) > .table-surface {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
     .asset-drawer {
-      position: fixed;
-      inset: 8rem 1.25rem auto auto;
-      width: min(25rem, 32vw);
-      max-height: calc(100dvh - 9rem);
+      position: sticky;
+      top: 5.5rem;
+      grid-column: 2;
+      grid-row: 1;
+      max-height: calc(100dvh - 6.5rem);
       overflow: auto;
-      z-index: 10;
+    }
+  }
+
+  @media (max-width: 1279px) {
+    .asset-drawer {
+      margin-bottom: 1rem;
     }
   }
 

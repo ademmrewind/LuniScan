@@ -54,7 +54,9 @@ export async function getHealth(signal: AbortSignal): Promise<Health> {
   })
   if (response.status !== 200 && response.status !== 503) return 'offline'
   const data = await response.json()
-  if (data?.status === 'ok' && data?.database === 'ok' && !response.headers.has('X-LuniScan-API-Version')) {
+  const version = /^(\d+)\.(\d+)\./.exec(response.headers.get('X-LuniScan-API-Version') ?? '')
+  const compatible = version && (Number(version[1]) > 0 || Number(version[2]) >= 6)
+  if (data?.status === 'ok' && data?.database === 'ok' && !compatible) {
     return 'outdated'
   }
   if (response.status === 200 && data?.status === 'ok' && data?.database === 'ok') {

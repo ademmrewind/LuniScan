@@ -76,15 +76,15 @@ def run_job(
         with scope.operation(wait_for_cooldown=True):
             for check in plan:
                 try:
-                    status, category = scope.probe_service(
+                    status, category, duration_ms = scope.probe_service(
                         check.ip_address, check.port, lambda: before(check)
                     )
                 except ApprovalChanged:
-                    status, category = "unknown", "approval_changed"
+                    status, category, duration_ms = "unknown", "approval_changed", None
                 except HTTPException as error:
                     if error.status_code not in (403, 422):
                         raise
-                    status, category = "unknown", "scope_denied"
+                    status, category, duration_ms = "unknown", "scope_denied", None
 
                 with Session(engine) as db:
                     changed = db.execute(
@@ -101,8 +101,18 @@ def run_job(
                             status=status,
                             error_category=category,
                             checked_at=now(),
+                            duration_ms=duration_ms,
                         )
                     )
+                    if status == "reachable":
+                        db.execute(
+                            update(Asset)
+                            .where(
+                                Asset.id == check.asset_id,
+                                Asset.address_revision == check.address_revision,
+                            )
+                            .values(last_seen=now())
+                        )
                     db.commit()
     except JobStopped:
         return

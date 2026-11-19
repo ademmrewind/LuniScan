@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added asset groups, tags, notes, last-seen timestamps, and persisted availability history through additive SQLite migrations.
+- Added bounded discovery progress, cancellation, and run history while retaining the synchronous discovery API.
+- Recorded TCP duration and error categories and added an asset intelligence panel for recent observations and changes.
+
 - Refined all six dashboard views, added inventory availability filters and history date filters, and preserved existing API routes.
 - Added same-origin mutation checks, bounded JSON request bodies, redacted validation payloads, SQLite foreign-key enforcement, and additional CSV neutralization.
 - Added browser and API regression coverage, release documentation, and CI.

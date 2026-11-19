@@ -214,7 +214,9 @@ function ResultsTable({ results, onSelect }: {
             <p className="break-all text-xs text-muted">{result.ip_address}</p>
           </td>
           <td className="p-2"><span className="break-all">{result.service_name}</span><p className="text-xs text-muted">TCP {result.port}</p></td>
-          <td className="p-2"><StatusBadge status={result.status} /></td>
+          <td className="p-2"><StatusBadge status={result.status} />
+            {result.duration_ms != null && <p className="text-xs text-muted">{result.duration_ms} ms</p>}
+          </td>
           <td className="p-2">{date(result.checked_at)}</td>
           {'duration_seconds' in result && <td className="p-2">{result.duration_seconds.toFixed(2)} s</td>}
         </tr>)}</tbody>

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -10,14 +10,24 @@ from pydantic import (
     StringConstraints,
     field_validator,
 )
-from sqlalchemy import JSON, DateTime, Integer, String, select, update
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Integer,
+    String,
+    exists,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from app.audit import asset_events
 from app.database import metadata
-from app.scope import Availability, Scope, parse_address
+from app.scope import Availability, ProbeError, Scope, parse_address
 
 router = APIRouter(prefix="/api", tags=["inventory"])
 
@@ -39,6 +49,10 @@ class Asset(Base):
     status: Mapped[str] = mapped_column(String(12), default="unknown")
     first_seen: Mapped[datetime] = mapped_column(DateTime)
     last_checked: Mapped[datetime | None] = mapped_column(DateTime)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime)
+    group_name: Mapped[str | None] = mapped_column(String(60))
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    notes: Mapped[str] = mapped_column(String(2000), default="")
     address_revision: Mapped[int] = mapped_column(Integer, default=0)
     __table_args__ = {"sqlite_autoincrement": True}
 
@@ -51,8 +65,23 @@ class DiscoveryJob(Base):
     results: Mapped[list[dict]] = mapped_column(JSON)
 
 
+class AssetObservation(Base):
+    __tablename__ = "asset_observations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(index=True)
+    ip_address: Mapped[str] = mapped_column(String(45))
+    status: Mapped[str] = mapped_column(String(12))
+    checked_at: Mapped[datetime] = mapped_column(DateTime)
+    duration_ms: Mapped[float | None]
+    port: Mapped[int]
+    error_category: Mapped[str | None] = mapped_column(String(24))
+
+
 IPLiteral = Annotated[str, StringConstraints(min_length=2, max_length=45)]
 ShortText = Annotated[str, StringConstraints(min_length=1, max_length=100)]
+Label = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)
+]
 
 
 class InputModel(BaseModel):
@@ -75,6 +104,17 @@ class AssetInput(InputModel):
     description: str = Field(default="", max_length=1000)
     asset_type: str = Field(min_length=1, max_length=50)
     operating_system: ShortText | None = None
+    group_name: Label | None = None
+    tags: list[Label] = Field(default_factory=list, max_length=20)
+    notes: str = Field(default="", max_length=2000)
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, values: list[str]) -> list[str]:
+        unique = {}
+        for value in values:
+            unique.setdefault(value.casefold(), value)
+        return list(unique.values())
 
     @field_validator("ip_address")
     @classmethod
@@ -88,8 +128,9 @@ class AssetView(AssetInput):
     status: Availability
     first_seen: datetime
     last_checked: datetime | None
+    last_seen: datetime | None
 
-    @field_validator("first_seen", "last_checked")
+    @field_validator("first_seen", "last_checked", "last_seen")
     @classmethod
     def utc_timestamp(cls, value: datetime | None) -> datetime | None:
         return value.replace(tzinfo=UTC) if value is not None else None
@@ -123,6 +164,9 @@ class DiscoveryResult(BaseModel):
     ip_address: str
     status: Availability
     checked_at: datetime
+    port: int | None = None
+    duration_ms: float | None = None
+    error_category: ProbeError | None = None
 
 
 class DiscoveryView(BaseModel):
@@ -182,11 +226,52 @@ def record_asset_event(db: Session, kind: str, asset_id: int, name: str) -> None
 
 
 @router.get("/assets")
-def list_assets(db: DB) -> list[AssetView]:
-    return [
-        AssetView.model_validate(asset)
-        for asset in db.scalars(select(Asset).order_by(Asset.display_name, Asset.id))
-    ]
+def list_assets(
+    db: DB,
+    q: Annotated[str, Query(max_length=100)] = "",
+    group: Annotated[str | None, Query(max_length=60)] = None,
+    tag: Annotated[str | None, Query(max_length=60)] = None,
+    asset_type: Annotated[str | None, Query(max_length=50)] = None,
+    status: Availability | None = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int | None, Query(ge=1, le=200)] = None,
+) -> list[AssetView]:
+    """List inventory records, with optional exact filters and pagination."""
+    statement = select(Asset).order_by(Asset.display_name, Asset.id).offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
+    if q.strip():
+        statement = statement.where(
+            or_(
+                *(
+                    column.icontains(q.strip(), autoescape=True)
+                    for column in (
+                        Asset.ip_address,
+                        Asset.display_name,
+                        Asset.hostname,
+                        Asset.description,
+                        Asset.notes,
+                    )
+                )
+            )
+        )
+    for column, value in (
+        (Asset.group_name, group),
+        (Asset.asset_type, asset_type),
+        (Asset.status, status),
+    ):
+        if value is not None:
+            statement = statement.where(func.lower(column) == value.strip().lower())
+    if tag is not None:
+        entries = func.json_each(Asset.tags).table_valued("value")
+        statement = statement.where(
+            exists(
+                select(1)
+                .select_from(entries)
+                .where(func.lower(entries.c.value) == tag.strip().lower())
+            )
+        )
+    return [AssetView.model_validate(asset) for asset in db.scalars(statement)]
 
 
 @router.post("/assets", status_code=201)
@@ -213,7 +298,12 @@ def edit_asset(
         asset.address_revision = Asset.address_revision + 1
         asset.status = "unknown"
         asset.last_checked = None
-    for field, value in payload.model_dump().items():
+        asset.last_seen = None
+    values = payload.model_dump()
+    for field in ("group_name", "notes", "tags"):
+        if field not in payload.model_fields_set:
+            values.pop(field)
+    for field, value in values.items():
         setattr(asset, field, value)
     save_asset(db)
     return AssetView.model_validate(asset)
@@ -252,22 +342,25 @@ def check_asset(
     scope.require(address)
     db.rollback()
     with scope.operation():
-        status = scope.probe(address)
+        result = measured_result(scope, address)
+        values = {"status": result.status, "last_checked": result.checked_at}
+        if result.status == "reachable":
+            values["last_seen"] = result.checked_at
         changed = db.execute(
             update(Asset)
             .where(Asset.id == asset_id, Asset.address_revision == revision)
-            .values(status=status, last_checked=datetime.now(UTC))
+            .values(**values)
         )
         if changed.rowcount != 1:
             raise HTTPException(
                 409, "Asset changed during the check. Refresh and try again."
             )
+        record_observation(db, asset_id, result)
         db.commit()
         return AssetView.model_validate(find_asset(db, asset_id))
 
 
-@router.post("/discovery-jobs", status_code=201)
-def discover(payload: DiscoveryRequest, db: DB, scope: ApprovedScope) -> DiscoveryView:
+def approved_targets(payload: DiscoveryRequest, scope: Scope) -> list[str]:
     if not payload.confirm_scope:
         raise HTTPException(422, "Confirm authorization for every target.")
     if len(payload.targets) > scope.discovery_limit:
@@ -275,46 +368,66 @@ def discover(payload: DiscoveryRequest, db: DB, scope: ApprovedScope) -> Discove
     targets = [str(scope.require(target)) for target in payload.targets]
     if len(set(targets)) != len(targets):
         raise HTTPException(422, "Discovery targets must be unique.")
+    return targets
+
+
+def measured_result(scope: Scope, address: str, before=None) -> DiscoveryResult:
+    status, category, duration = scope.probe_service(address, scope.port, before)
+    return DiscoveryResult(
+        ip_address=address,
+        status=status,
+        error_category=category,
+        duration_ms=duration,
+        port=scope.port,
+        checked_at=datetime.now(UTC),
+    )
+
+
+def record_observation(db: Session, asset_id: int, result: DiscoveryResult) -> None:
+    db.add(AssetObservation(asset_id=asset_id, **result.model_dump()))
+
+
+def save_discovery_result(db: Session, result: DiscoveryResult) -> None:
+    if result.status == "reachable":
+        asset_id = db.scalar(
+            insert(Asset)
+            .values(
+                ip_address=result.ip_address,
+                display_name=result.ip_address,
+                description="",
+                asset_type="unknown",
+                first_seen=result.checked_at,
+                last_checked=result.checked_at,
+                last_seen=result.checked_at,
+                status=result.status,
+            )
+            .on_conflict_do_nothing(index_elements=[Asset.ip_address])
+            .returning(Asset.id)
+        )
+        if asset_id is not None:
+            record_asset_event(db, "asset_created", asset_id, result.ip_address)
+            record_observation(db, asset_id, result)
+            return
+    values = {"status": result.status, "last_checked": result.checked_at}
+    if result.status == "reachable":
+        values["last_seen"] = result.checked_at
+    asset_id = db.scalar(
+        update(Asset)
+        .where(Asset.ip_address == result.ip_address)
+        .values(**values)
+        .returning(Asset.id)
+    )
+    if asset_id is not None:
+        record_observation(db, asset_id, result)
+
+
+@router.post("/discovery-jobs", status_code=201)
+def discover(payload: DiscoveryRequest, db: DB, scope: ApprovedScope) -> DiscoveryView:
+    targets = approved_targets(payload, scope)
     with scope.operation():
-        results = [
-            DiscoveryResult(
-                ip_address=target,
-                status=scope.probe(target),
-                checked_at=datetime.now(UTC),
-            )
-            for target in targets
-        ]
+        results = [measured_result(scope, target) for target in targets]
         for result in results:
-            if result.status != "reachable":
-                db.execute(
-                    update(Asset)
-                    .where(Asset.ip_address == result.ip_address)
-                    .values(status=result.status, last_checked=result.checked_at)
-                )
-                continue
-            statement = (
-                insert(Asset)
-                .values(
-                    ip_address=result.ip_address,
-                    display_name=result.ip_address,
-                    description="",
-                    asset_type="unknown",
-                    first_seen=result.checked_at,
-                    last_checked=result.checked_at,
-                    status=result.status,
-                )
-                .on_conflict_do_nothing(index_elements=[Asset.ip_address])
-                .returning(Asset.id)
-            )
-            asset_id = db.scalar(statement)
-            if asset_id is None:
-                db.execute(
-                    update(Asset)
-                    .where(Asset.ip_address == result.ip_address)
-                    .values(status=result.status, last_checked=result.checked_at)
-                )
-            else:
-                record_asset_event(db, "asset_created", asset_id, result.ip_address)
+            save_discovery_result(db, result)
         job = DiscoveryJob(
             completed_at=datetime.now(UTC),
             results=[result.model_dump(mode="json") for result in results],

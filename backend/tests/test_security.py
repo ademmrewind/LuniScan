@@ -73,7 +73,7 @@ def test_validation_does_not_echo_payload(client):
 
 def test_denied_cross_origin_discovery_does_not_connect(client, monkeypatch):
     probe = Mock()
-    monkeypatch.setattr(scope, "tcp_probe", probe)
+    monkeypatch.setattr(scope, "probe_tcp_details", probe)
     result = client.post(
         "/api/discovery-jobs",
         json={

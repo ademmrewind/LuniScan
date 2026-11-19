@@ -37,7 +37,11 @@ def client(settings):
 @pytest.fixture
 def probe(monkeypatch):
     probe = Mock(return_value="reachable")
-    monkeypatch.setattr(scope_module, "tcp_probe", probe)
+    monkeypatch.setattr(
+        scope_module,
+        "probe_tcp_details",
+        lambda address, port: (probe(address, port), None),
+    )
     monkeypatch.setattr(scope_module, "sleep", Mock())
     return probe
 

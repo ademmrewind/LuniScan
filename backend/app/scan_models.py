@@ -70,6 +70,7 @@ class ScanResult(Base):
     status: Mapped[str] = mapped_column(String(12))
     error_category: Mapped[str | None] = mapped_column(String(24))
     checked_at: Mapped[datetime] = mapped_column(DateTime)
+    duration_ms: Mapped[float | None]
 
 
 Index("scan_result_endpoint", ScanResult.asset_id, ScanResult.service_id, ScanResult.id)
@@ -117,6 +118,7 @@ class ResultView(BaseModel):
     status: Availability
     error_category: ProbeError | None
     checked_at: datetime
+    duration_ms: float | None = None
 
 
 class HistoryView(ResultView):

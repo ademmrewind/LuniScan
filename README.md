@@ -7,6 +7,7 @@ LuniScan is a local-first network asset inventory and security monitoring projec
 - FastAPI initializes a local SQLite database through SQLAlchemy at startup.
 - The responsive React dashboard shows live API and database health. It refreshes every 30 seconds and supports manual refresh.
 - Overview, Assets, Scans, Scan History, and Reports use the live API. Settings displays the active scope and validates IP literals against it.
+- Asset records can include an optional group, tags, notes, and an operator-supplied OS. Discovery runs show per-target progress and retain completed observations.
 - Local development uses a same-origin Vite proxy for API requests. Docker Compose publishes both services on loopback.
 
 ## Screenshots
@@ -69,11 +70,13 @@ If health responds but application routes return 404, check that <http://127.0.0
 
 ## Inventory and discovery
 
-Use **Assets** to add, search, edit, or delete inventory records. Select an asset to see its details and check the approved TCP endpoint. The IP address is unique and stored in canonical form. An IP change resets availability. First-seen and check times are stored in UTC and displayed in the browser's local time.
+Use **Assets** to add, search, edit, or delete inventory records. Enter one group name, up to 20 tags, and optional notes. Filter by group, tag, type, or availability. Select an asset to see recent fixed-port observations, named service checks, related jobs, and observed changes. IPv4 and IPv6 literals are stored in canonical form. An IP change resets current availability and last-seen values while retaining recorded history. The last-seen time is updated only after a successful connection. Timestamps are stored in UTC and displayed in the browser's local time.
 
 For a local check, start a TCP listener you control on port 8443, or configure the port of an existing authorized lab listener. Add `127.0.0.1` to the inventory and select **Check availability**. A successful TCP connection means the service endpoint was **reachable**. Connection refusal or timeout yields **unreachable**. Other socket failures yield **unknown**. An unchecked asset starts as **unknown**. Hostnames and operating systems are operator-supplied metadata. A result describes the configured endpoint at check time.
 
-Use **Discover** to enter individual IP addresses and confirm that you have permission to check each one. The API validates the entire list before making any connection. It persists completed jobs and per-address results. Discovery creates inventory records only for endpoints that accept the connection and updates status for addresses already in the inventory. Newly discovered records use the IP as the display name and leave hostname and operating system empty.
+Use **Discover** to enter individual IP addresses, optionally validate the list, and confirm that you have permission to check every endpoint. The API validates the entire list before making a connection and revalidates each address before connecting. The panel shows committed results and lets you cancel remaining targets. If a connection was already admitted, it may finish within its timeout, but its result is discarded if cancellation commits first. Interrupted runs are marked failed on startup. Discovery creates records for endpoints that accept the connection and updates existing inventory observations. Newly discovered records use the IP as the display name and leave hostname and operating system empty.
+
+Availability and scan observations include UTC check time, address, TCP port, outcome, error category, and elapsed probe time in milliseconds. Named checks include the approved service name. The duration excludes time spent waiting for the rate limiter. Historical rows with no measured duration or last-seen value remain empty. The application adds the new columns and tables on startup. Back up the SQLite file before upgrading.
 
 ### Authorized use
 
@@ -91,6 +94,12 @@ Run the API with a single worker to keep the limit of one in-flight operation an
 | `POST /api/assets/{id}/check` | Check an asset using an empty JSON object |
 | `POST /api/discovery-jobs` | Submit an explicit `targets` array and `confirm_scope: true`. Returns the completed job. |
 | `GET /api/discovery-jobs`, `GET /api/discovery-jobs/{id}` | Read the latest 50 completed jobs or one job by ID |
+| `POST /api/discovery-runs` | Start a bounded, explicitly approved run and receive its ID |
+| `GET /api/discovery-runs`, `GET /api/discovery-runs/{id}` | Read paginated run history or poll per-target progress |
+| `POST /api/discovery-runs/{id}/cancel` | Cancel pending targets with an empty JSON object |
+| `GET /api/assets/{id}/intelligence` | Read recent inventory observations, named service results, jobs, and connectivity changes |
+
+`GET /api/assets` accepts optional `q`, `group`, `tag`, `asset_type`, `status`, `offset`, and `limit` parameters. The original unpaginated request and synchronous discovery routes remain available. Existing asset updates that omit the new metadata fields preserve their stored values.
 
 Malformed payloads return 422, out-of-scope targets return 403, missing records return 404, and duplicate asset IP addresses return 409.
 

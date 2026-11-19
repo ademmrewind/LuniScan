@@ -1,17 +1,20 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Plus, Radar, RefreshCw, Search, X } from 'lucide-react'
 import { inventoryApi, type Asset, type AssetInput, type Availability, type Scope } from './inventoryApi'
 import { StatusBadge } from './StatusBadge'
+import { AssetObservations } from './AssetObservations'
+import { DiscoveryPanel } from './DiscoveryPanel'
 
 const statuses = ['reachable', 'unreachable', 'unknown'] as const
 
 type DialogState = { kind: 'add' | 'discover' } | { kind: 'edit' | 'delete'; asset: Asset }
 
-function Modal({ title, children, onClose, busy }: {
+function Modal({ title, children, onClose, busy, wide }: {
   title: string
   children: ReactNode
   onClose: () => void
   busy: boolean
+  wide?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
@@ -22,7 +25,7 @@ function Modal({ title, children, onClose, busy }: {
 
   return (
     <dialog ref={ref} aria-labelledby="modal-title"
-      className="editorial-dialog m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-y-auto border border-line bg-panel p-5 text-slate-100 sm:p-6"
+      className={'editorial-dialog m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] overflow-y-auto border border-line bg-panel p-5 text-slate-100 sm:p-6 ' + (wide ? 'max-w-2xl' : 'max-w-lg')}
       onCancel={(event) => { event.preventDefault(); if (!busy) onClose() }}>
       <div className="mb-5 flex items-center justify-between gap-4">
         <h2 id="modal-title" className="text-xl font-semibold">{title}</h2>
@@ -51,6 +54,9 @@ function AssetForm({ asset, busy, onSave }: {
       description: value('description'),
       asset_type: value('asset_type'),
       operating_system: value('operating_system') || null,
+      group_name: value('group_name') || null,
+      tags: String(form.get('tags') ?? '').split(/\r?\n/).map((tag) => tag.trim()).filter(Boolean),
+      notes: value('notes'),
     })
   }
   return (
@@ -61,37 +67,13 @@ function AssetForm({ asset, busy, onSave }: {
         <label className="asset-label">Hostname (optional)<input className="asset-input" name="hostname" maxLength={253} defaultValue={asset?.hostname ?? ''} /></label>
         <label className="asset-label">Asset type<input className="asset-input" name="asset_type" required maxLength={50} defaultValue={asset?.asset_type} /></label>
         <label className="asset-label sm:col-span-2">Operating system (optional)<input className="asset-input" name="operating_system" maxLength={100} defaultValue={asset?.operating_system ?? ''} /></label>
+        <label className="asset-label">Group<input className="asset-input" name="group_name" maxLength={60} defaultValue={asset?.group_name ?? ''} /></label>
+        <div className="asset-label"><label htmlFor="asset-tags">Tags (one per line)</label>
+          <textarea id="asset-tags" className="asset-input" name="tags" rows={2} maxLength={1220} defaultValue={asset?.tags.join('\n')} /></div>
+        <div className="asset-label sm:col-span-2"><label htmlFor="asset-notes">Notes</label>
+          <textarea id="asset-notes" className="asset-input" name="notes" rows={2} maxLength={2000} defaultValue={asset?.notes} /></div>
         <label className="asset-label sm:col-span-2">Description<textarea className="asset-input" name="description" rows={3} maxLength={1000} defaultValue={asset?.description} /></label>
         <button type="submit" className="asset-button asset-primary sm:col-span-2 sm:justify-self-end">{busy ? 'Saving…' : 'Save asset'}</button>
-      </fieldset>
-    </form>
-  )
-}
-
-function DiscoveryForm({ scope, busy, onDiscover }: {
-  scope: Scope
-  busy: boolean
-  onDiscover: (targets: string[]) => void
-}) {
-  return (
-    <form onSubmit={(event) => {
-      event.preventDefault()
-      const data = new FormData(event.currentTarget)
-      onDiscover(String(data.get('targets')).trim().split(/[\s,]+/).filter(Boolean))
-    }}>
-      <fieldset disabled={busy} className="space-y-4">
-        <div className="space-y-1 rounded-xl border border-line bg-canvas p-3 text-sm text-muted">
-          <p>Approved ranges <span className="break-words text-slate-100">{scope.networks.join(', ')}</span></p>
-          <p>Service endpoint TCP {scope.service_port} · Up to {scope.discovery_limit} IP addresses</p>
-        </div>
-        <label className="asset-label">IP addresses, one per line
-          <textarea className="asset-input" name="targets" required rows={4} maxLength={512} />
-        </label>
-        <label className="flex items-start gap-3 text-sm">
-          <input type="checkbox" required className="mt-1 accent-teal-400" />
-          I confirm that I am authorized to check every listed address.
-        </label>
-        <button className="asset-button asset-primary" type="submit">{busy ? 'Checking targets…' : 'Discover assets'}</button>
       </fieldset>
     </form>
   )
@@ -107,6 +89,9 @@ export function AssetsPage() {
   const [selected, setSelected] = useState<number | null>(null)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<Availability | ''>('')
+  const [group, setGroup] = useState('')
+  const [tag, setTag] = useState('')
+  const [type, setType] = useState('')
   const [revision, setRevision] = useState(0)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -141,13 +126,13 @@ export function AssetsPage() {
     return () => controller.abort()
   }, [revision])
 
-  function refresh() {
+  const refresh = useCallback(() => {
     setLoading(true)
     setError('')
     setListError('')
     setScopeError('')
     setRevision((value) => value + 1)
-  }
+  }, [])
 
   function openDialog(next: DialogState) {
     setDialogError('')
@@ -175,11 +160,18 @@ export function AssetsPage() {
   const search = query.trim().toLowerCase()
   const visible = assets.filter((asset) =>
     (!statusFilter || asset.status === statusFilter) &&
-    [asset.display_name, asset.ip_address, asset.hostname, asset.asset_type, asset.operating_system, asset.status]
+    (!group || asset.group_name === group) && (!tag || asset.tags.includes(tag)) && (!type || asset.asset_type === type) &&
+    [asset.display_name, asset.ip_address, asset.hostname, asset.asset_type, asset.operating_system, asset.status,
+      asset.group_name, ...asset.tags, asset.description, asset.notes]
       .some((value) => value?.toLowerCase().includes(search)),
   )
   const active = assets.find((asset) => asset.id === selected)
   const actionDisabled = loading || busy
+  const filters = [
+    { label: 'group', value: group, set: setGroup, options: assets.flatMap((asset) => asset.group_name ? [asset.group_name] : []) },
+    { label: 'tag', value: tag, set: setTag, options: assets.flatMap((asset) => asset.tags) },
+    { label: 'type', value: type, set: setType, options: assets.map((asset) => asset.asset_type) },
+  ]
 
   return (
     <div className="workspace-stack">
@@ -203,6 +195,11 @@ export function AssetsPage() {
           <option value="">All availability</option>
           {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
         </select>
+        {filters.map((filter) => <select key={filter.label} aria-label={'Filter asset ' + filter.label}
+          className="asset-input w-auto max-w-full" value={filter.value} onChange={(event) => filter.set(event.target.value)}>
+          <option value="">All {filter.label}s</option>
+          {[...new Set(filter.options)].sort().map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>)}
         <button className="asset-button" onClick={refresh} disabled={actionDisabled}><RefreshCw size={16} /> Refresh</button>
         <button className="asset-button" onClick={() => openDialog({ kind: 'discover' })} disabled={actionDisabled || !scope}>
           <Radar size={16} /> Discover
@@ -215,6 +212,7 @@ export function AssetsPage() {
       {listError && <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-200">{listError}</p>}
       {scopeError && scopeError !== listError && <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-200">Scope details: {scopeError}</p>}
       {message && <p role="status" className="break-words rounded-lg border border-teal-400/25 bg-teal-400/10 p-3 text-sm text-teal-200">{message}</p>}
+      <div className="inventory-content">
       {active && (
         <section aria-labelledby="asset-details" className="asset-drawer surface rounded-xl border border-line bg-panel p-4 sm:p-5">
           <div className="mb-4 flex items-start justify-between gap-3">
@@ -231,6 +229,10 @@ export function AssetsPage() {
             <div><dt className="text-muted">Operating system</dt><dd className="break-words">{active.operating_system ?? '—'}</dd></div>
             <div><dt className="text-muted">First seen</dt><dd>{formatDate(active.first_seen)}</dd></div>
             <div><dt className="text-muted">Last checked</dt><dd>{formatDate(active.last_checked)}</dd></div>
+            <div><dt className="text-muted">Last seen</dt><dd>{formatDate(active.last_seen)}</dd></div>
+            <div><dt className="text-muted">Group</dt><dd className="break-words">{active.group_name ?? '—'}</dd></div>
+            <div className="sm:col-span-2"><dt className="text-muted">Tags</dt><dd className="break-words">{active.tags.join(', ') || '—'}</dd></div>
+            {active.notes && <div className="sm:col-span-2"><dt className="text-muted">Notes</dt><dd className="break-words whitespace-pre-wrap">{active.notes}</dd></div>}
             {active.description && <div className="sm:col-span-2"><dt className="text-muted">Description</dt><dd className="break-words whitespace-pre-wrap">{active.description}</dd></div>}
           </dl>
           <div className="mt-5 flex flex-wrap gap-2">
@@ -241,6 +243,7 @@ export function AssetsPage() {
             <button className="asset-button" disabled={actionDisabled} onClick={() => openDialog({ kind: 'edit', asset: active })}>Edit</button>
             <button className="asset-button text-rose-300" disabled={actionDisabled} onClick={() => openDialog({ kind: 'delete', asset: active })}>Delete</button>
           </div>
+          <AssetObservations key={active.id} assetId={active.id} revision={revision} />
         </section>
       )}
       <section aria-label="Asset inventory" aria-busy={loading} className="table-surface">
@@ -249,7 +252,7 @@ export function AssetsPage() {
           <div aria-hidden="true" className="skeleton h-5 w-1/2 rounded" />
         </div>}
         {!loading && !listError && visible.length === 0 && (
-          <p className="p-5 text-sm text-muted">{search || statusFilter ? 'No assets match your search.' : 'No assets in the inventory yet.'}</p>
+          <p className="p-5 text-sm text-muted">{search || statusFilter || group || tag || type ? 'No assets match your search.' : 'No assets in the inventory yet.'}</p>
         )}
         {visible.length > 0 && (
           <div className="overflow-x-auto">
@@ -277,9 +280,10 @@ export function AssetsPage() {
           </div>
         )}
       </section>
+      </div>
       {dialog && (
         <Modal title={{ add: 'Add asset', edit: 'Edit asset', delete: 'Delete asset', discover: 'Discover assets' }[dialog.kind]}
-          busy={busy} onClose={() => setDialog(null)}>
+          busy={busy} wide={dialog.kind === 'discover'} onClose={() => setDialog(null)}>
           {dialogError && <p role="alert" className="mb-4 text-sm text-rose-300">{dialogError}</p>}
           {(dialog.kind === 'add' || dialog.kind === 'edit') && <AssetForm asset={dialog.kind === 'edit' ? dialog.asset : undefined}
             busy={busy} onSave={(values) => void perform(async () => {
@@ -302,11 +306,7 @@ export function AssetsPage() {
             </>
           )}
           {dialog.kind === 'discover' && scope && (
-            <DiscoveryForm scope={scope} busy={busy} onDiscover={(targets) => void perform(async () => {
-              const job = await inventoryApi.discover(targets)
-              return 'Discovery #' + job.id + ' completed. ' + job.results
-                .map((result) => result.ip_address + ' — ' + result.status).join(' · ')
-            })} />
+            <DiscoveryPanel scope={scope} onSettled={refresh} />
           )}
         </Modal>
       )}

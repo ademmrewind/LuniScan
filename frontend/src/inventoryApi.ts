@@ -9,6 +9,9 @@ export interface AssetInput {
   description: string
   asset_type: string
   operating_system: string | null
+  group_name: string | null
+  tags: string[]
+  notes: string
 }
 
 export interface Asset extends AssetInput {
@@ -16,6 +19,7 @@ export interface Asset extends AssetInput {
   status: Availability
   first_seen: string
   last_checked: string | null
+  last_seen: string | null
 }
 
 export interface Scope {
@@ -24,10 +28,39 @@ export interface Scope {
   discovery_limit: number
 }
 
-interface DiscoveryJob {
+export interface Observation {
+  ip_address: string
+  status: Availability
+  checked_at: string
+  port: number | null
+  duration_ms: number | null
+  error_category: string | null
+}
+
+export interface DiscoveryRun {
   id: number
-  completed_at: string
-  results: { ip_address: string; status: Availability; checked_at: string }[]
+  created_at: string
+  completed_at: string | null
+  status: 'running' | 'completed' | 'cancelled' | 'failed'
+  port: number
+  failure: string | null
+  targets: string[]
+  results: Observation[]
+}
+
+export interface ServiceObservation extends Observation {
+  service_name: string
+  job_id: number
+}
+
+export interface AssetIntelligence {
+  last_connectivity_check: string | null
+  monitored_services: { id: number; name: string; port: number }[]
+  latest_results: ServiceObservation[]
+  availability_history: Observation[]
+  service_history: ServiceObservation[]
+  recent_jobs: { id: number; status: string; created_at: string }[]
+  changes: { id: number; service_name: string; before: string; after: string; checked_at: string }[]
 }
 
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -52,9 +85,12 @@ export const inventoryApi = {
   edit: (id: number, asset: AssetInput) => submit<Asset>('/assets/' + id, 'PUT', asset),
   remove: (id: number) => request<void>('/assets/' + id, { method: 'DELETE' }),
   check: (id: number) => submit<Asset>('/assets/' + id + '/check', 'POST', {}),
-  discover: (targets: string[]) => submit<DiscoveryJob>('/discovery-jobs', 'POST', {
+  intelligence: (id: number, signal: AbortSignal) => request<AssetIntelligence>('/assets/' + id + '/intelligence', { signal }),
+  discoveryRuns: (signal: AbortSignal) => request<DiscoveryRun[]>('/discovery-runs', { signal }),
+  discoveryRun: (id: number, signal: AbortSignal) => request<DiscoveryRun>('/discovery-runs/' + id, { signal }),
+  cancelDiscovery: (id: number) => submit<DiscoveryRun>('/discovery-runs/' + id + '/cancel', 'POST', {}),
+  discover: (targets: string[]) => submit<DiscoveryRun>('/discovery-runs', 'POST', {
     targets,
     confirm_scope: true,
   }),
 }
-

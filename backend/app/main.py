@@ -15,6 +15,9 @@ from app.analytics import analytics_indexes
 from app.analytics import router as analytics_router
 from app.config import Settings
 from app.database import check_database, initialize_database
+from app.discovery import recover_discovery
+from app.discovery import router as discovery_router
+from app.intelligence import router as intelligence_router
 from app.inventory import router as inventory_router
 from app.reporting import router as reporting_router
 from app.scan_runner import recover_jobs
@@ -23,7 +26,7 @@ from app.scope import Scope
 from app.security import LocalAPIProtection
 
 logger = logging.getLogger(__name__)
-API_VERSION = "0.4.1"
+API_VERSION = "0.6.0"
 
 
 class HealthStatus(BaseModel):
@@ -54,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 for index in analytics_indexes:
                     index.create(engine, checkfirst=True)
                 recover_jobs(engine)
+                recover_discovery(engine)
             except SQLAlchemyError:
                 raise RuntimeError("Could not initialize the SQLite database.") from None
             application.state.engine = engine
@@ -65,6 +69,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.add_middleware(LocalAPIProtection)
     application.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     application.include_router(inventory_router)
+    application.include_router(discovery_router)
+    application.include_router(intelligence_router)
     application.include_router(scans_router)
     application.include_router(analytics_router)
     application.include_router(reporting_router)
